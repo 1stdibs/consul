@@ -43,14 +43,14 @@ func routesFromSnapshotTerminatingGateway(_ connectionInfo, cfgSnap *proxycfg.Co
 	}
 
 	var resources []proto.Message
-	for svc := range cfgSnap.TerminatingGateway.ServiceGroups {
+	for _, svc := range cfgSnap.TerminatingGateway.ValidServices() {
 		clusterName := connect.ServiceSNI(svc.Name, "", svc.NamespaceOrDefault(), cfgSnap.Datacenter, cfgSnap.Roots.TrustDomain)
 		resolver, hasResolver := cfgSnap.TerminatingGateway.ServiceResolvers[svc]
 
 		svcConfig := cfgSnap.TerminatingGateway.ServiceConfigs[svc]
 
 		cfg, err := ParseProxyConfig(svcConfig.ProxyConfig)
-		if err != nil || cfg.Protocol != "http" {
+		if err != nil || structs.IsProtocolHTTPLike(cfg.Protocol) {
 			// Routes can only be defined for HTTP services
 			continue
 		}
@@ -59,7 +59,8 @@ func routesFromSnapshotTerminatingGateway(_ connectionInfo, cfgSnap *proxycfg.Co
 			// Use a zero value resolver with no timeout and no subsets
 			resolver = &structs.ServiceResolverConfigEntry{}
 		}
-		route, err := makeNamedDefaultRouteWithLB(clusterName, resolver.LoadBalancer)
+
+		route, err := makeNamedDefaultRouteWithLB(clusterName, resolver.LoadBalancer.EnvoyLBConfig)
 		if err != nil {
 			continue
 		}
@@ -68,7 +69,7 @@ func routesFromSnapshotTerminatingGateway(_ connectionInfo, cfgSnap *proxycfg.Co
 		// If there is a service-resolver for this service then also setup routes for each subset
 		for name := range resolver.Subsets {
 			clusterName = connect.ServiceSNI(svc.Name, name, svc.NamespaceOrDefault(), cfgSnap.Datacenter, cfgSnap.Roots.TrustDomain)
-			route, err := makeNamedDefaultRouteWithLB(clusterName, resolver.LoadBalancer)
+			route, err := makeNamedDefaultRouteWithLB(clusterName, resolver.LoadBalancer.EnvoyLBConfig)
 			if err != nil {
 				continue
 			}
@@ -76,14 +77,16 @@ func routesFromSnapshotTerminatingGateway(_ connectionInfo, cfgSnap *proxycfg.Co
 		}
 	}
 
-	// TODO(rb): make sure we don't generate an empty result
 	return resources, nil
 }
 
-func makeNamedDefaultRouteWithLB(clusterName string, lb structs.LoadBalancer) (*envoy.RouteConfiguration, error) {
+func makeNamedDefaultRouteWithLB(clusterName string, lb *structs.EnvoyLBConfig) (*envoy.RouteConfiguration, error) {
 	action := makeRouteActionFromName(clusterName)
-	if err := injectLBToRouteAction(lb, action.Route); err != nil {
-		return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
+
+	if lb != nil {
+		if err := injectLBToRouteAction(lb, action.Route); err != nil {
+			return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
+		}
 	}
 
 	return &envoy.RouteConfiguration{
@@ -270,14 +273,14 @@ func makeUpstreamRouteForDiscoveryChain(
 					return nil, err
 				}
 
-				if err := injectLBToRouteAction(nextNode.LoadBalancer, routeAction.Route); err != nil {
+				if err := injectLBToRouteAction(nextNode.LoadBalancer.EnvoyLBConfig, routeAction.Route); err != nil {
 					return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
 				}
 
 			case structs.DiscoveryGraphNodeTypeResolver:
 				routeAction = makeRouteActionForChainCluster(nextNode.Resolver.Target, chain)
 
-				if err := injectLBToRouteAction(nextNode.LoadBalancer, routeAction.Route); err != nil {
+				if err := injectLBToRouteAction(nextNode.LoadBalancer.EnvoyLBConfig, routeAction.Route); err != nil {
 					return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
 				}
 
@@ -332,7 +335,7 @@ func makeUpstreamRouteForDiscoveryChain(
 			return nil, err
 		}
 
-		if err := injectLBToRouteAction(startNode.LoadBalancer, routeAction.Route); err != nil {
+		if err := injectLBToRouteAction(startNode.LoadBalancer.EnvoyLBConfig, routeAction.Route); err != nil {
 			return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
 		}
 
@@ -346,7 +349,7 @@ func makeUpstreamRouteForDiscoveryChain(
 	case structs.DiscoveryGraphNodeTypeResolver:
 		routeAction := makeRouteActionForChainCluster(startNode.Resolver.Target, chain)
 
-		if err := injectLBToRouteAction(startNode.LoadBalancer, routeAction.Route); err != nil {
+		if err := injectLBToRouteAction(startNode.LoadBalancer.EnvoyLBConfig, routeAction.Route); err != nil {
 			return nil, fmt.Errorf("failed to apply load balancer configuration to route action: %v", err)
 		}
 
@@ -370,14 +373,14 @@ func makeUpstreamRouteForDiscoveryChain(
 	return host, nil
 }
 
-func injectLBToRouteAction(lb structs.LoadBalancer, action *envoyroute.RouteAction) error {
-	if !lb.IsHashBased() {
+func injectLBToRouteAction(lb *structs.EnvoyLBConfig, action *envoyroute.RouteAction) error {
+	if lb == nil || !lb.IsHashBased() {
 		return nil
 	}
 
 	result := make([]*envoyroute.RouteAction_HashPolicy, 0, len(lb.HashPolicies))
 	for _, policy := range lb.HashPolicies {
-		if policy.SourceAddress {
+		if policy.SourceIP {
 			result = append(result, &envoyroute.RouteAction_HashPolicy{
 				PolicySpecifier: &envoyroute.RouteAction_HashPolicy_ConnectionProperties_{
 					ConnectionProperties: &envoyroute.RouteAction_HashPolicy_ConnectionProperties{
@@ -391,29 +394,29 @@ func injectLBToRouteAction(lb structs.LoadBalancer, action *envoyroute.RouteActi
 		}
 
 		switch policy.Field {
-		case "header":
+		case structs.HashPolicyHeader:
 			result = append(result, &envoyroute.RouteAction_HashPolicy{
 				PolicySpecifier: &envoyroute.RouteAction_HashPolicy_Header_{
 					Header: &envoyroute.RouteAction_HashPolicy_Header{
-						HeaderName: policy.FieldMatchValue,
+						HeaderName: policy.FieldValue,
 					},
 				},
 				Terminal: policy.Terminal,
 			})
-		case "cookie":
+		case structs.HashPolicyCookie:
 			result = append(result, &envoyroute.RouteAction_HashPolicy{
 				PolicySpecifier: &envoyroute.RouteAction_HashPolicy_Cookie_{
 					Cookie: &envoyroute.RouteAction_HashPolicy_Cookie{
-						Name: policy.FieldMatchValue,
+						Name: policy.FieldValue,
 					},
 				},
 				Terminal: policy.Terminal,
 			})
-		case "query_parameter":
+		case structs.HashPolicyQueryParam:
 			result = append(result, &envoyroute.RouteAction_HashPolicy{
 				PolicySpecifier: &envoyroute.RouteAction_HashPolicy_QueryParameter_{
 					QueryParameter: &envoyroute.RouteAction_HashPolicy_QueryParameter{
-						Name: policy.FieldMatchValue,
+						Name: policy.FieldValue,
 					},
 				},
 				Terminal: policy.Terminal,

@@ -206,13 +206,14 @@ func (s *Server) makeGatewayServiceClusters(cfgSnap *proxycfg.ConfigSnapshot) ([
 		clusterName := connect.ServiceSNI(svc.Name, "", svc.NamespaceOrDefault(), cfgSnap.Datacenter, cfgSnap.Roots.TrustDomain)
 		resolver, hasResolver := resolvers[svc]
 
-		var lb structs.LoadBalancer
+		var lb *structs.EnvoyLBConfig
 
-		if !hasResolver {
+		if hasResolver && resolver.LoadBalancer != nil {
+			lb = resolver.LoadBalancer.EnvoyLBConfig
+
+		} else if resolver.LoadBalancer != nil {
 			// Use a zero value resolver with no timeout and no subsets
 			resolver = &structs.ServiceResolverConfigEntry{}
-		} else {
-			lb = resolver.LoadBalancer
 		}
 
 		// When making service clusters we only pass endpoints with hostnames if the kind is a terminating gateway
@@ -232,16 +233,16 @@ func (s *Server) makeGatewayServiceClusters(cfgSnap *proxycfg.ConfigSnapshot) ([
 		case structs.ServiceKindTerminatingGateway:
 			injectTerminatingGatewayTLSContext(cfgSnap, cluster, svc)
 
-			err := injectLBToCluster(lb, cluster)
-			if err != nil {
-				return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
+			if lb != nil {
+				if err := injectLBToCluster(lb, cluster); err != nil {
+					return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
+				}
 			}
 		case structs.ServiceKindMeshGateway:
 			// We can't apply hash based LB config to mesh gateways because they rely on inspecting HTTP attributes
 			// and mesh gateways do not decrypt traffic
-			if !lb.IsHashBased() {
-				err := injectLBToCluster(lb, cluster)
-				if err != nil {
+			if lb != nil && !lb.IsHashBased() {
+				if err := injectLBToCluster(lb, cluster); err != nil {
 					return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
 				}
 			}
@@ -266,17 +267,17 @@ func (s *Server) makeGatewayServiceClusters(cfgSnap *proxycfg.ConfigSnapshot) ([
 			switch cfgSnap.Kind {
 			case structs.ServiceKindTerminatingGateway:
 				injectTerminatingGatewayTLSContext(cfgSnap, cluster, svc)
-
-				err := injectLBToCluster(lb, cluster)
-				if err != nil {
-					return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
+				if lb != nil {
+					if err := injectLBToCluster(lb, cluster); err != nil {
+						return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
+					}
 				}
+
 			case structs.ServiceKindMeshGateway:
 				// We can't apply hash based LB config to mesh gateways because they rely on inspecting HTTP attributes
 				// and mesh gateways do not decrypt traffic
-				if !lb.IsHashBased() {
-					err := injectLBToCluster(lb, cluster)
-					if err != nil {
+				if lb != nil && !lb.IsHashBased() {
+					if err := injectLBToCluster(lb, cluster); err != nil {
 						return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", clusterName, err)
 					}
 				}
@@ -516,8 +517,10 @@ func (s *Server) makeUpstreamClustersForDiscoveryChain(
 			OutlierDetection: cfg.PassiveHealthCheck.AsOutlierDetection(),
 		}
 
-		if err := injectLBToCluster(node.LoadBalancer, c); err != nil {
-			return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", sni, err)
+		if lb := node.LoadBalancer; lb != nil && lb.EnvoyLBConfig != nil {
+			if err := injectLBToCluster(lb.EnvoyLBConfig, c); err != nil {
+				return nil, fmt.Errorf("failed to apply load balancer configuration to cluster %q: %v", sni, err)
+			}
 		}
 
 		proto := cfg.Protocol
@@ -557,22 +560,26 @@ func (s *Server) makeUpstreamClustersForDiscoveryChain(
 	return out, nil
 }
 
-func injectLBToCluster(l structs.LoadBalancer, c *envoy.Cluster) error {
+func injectLBToCluster(l *structs.EnvoyLBConfig, c *envoy.Cluster) error {
+	if l == nil {
+		return nil
+	}
+
 	switch l.Policy {
 	case "":
 		return nil
-	case "least_request":
+	case structs.LBPolicyLeastRequest:
 		c.LbPolicy = envoy.Cluster_LEAST_REQUEST
 		c.LbConfig = &envoy.Cluster_LeastRequestLbConfig_{
 			LeastRequestLbConfig: &envoy.Cluster_LeastRequestLbConfig{
 				ChoiceCount: &wrappers.UInt32Value{Value: l.LeastRequestConfig.ChoiceCount},
 			},
 		}
-	case "round_robin":
+	case structs.LBPolicyRoundRobin:
 		c.LbPolicy = envoy.Cluster_ROUND_ROBIN
-	case "random":
+	case structs.LBPolicyRandom:
 		c.LbPolicy = envoy.Cluster_RANDOM
-	case "ring_hash":
+	case structs.LBPolicyRingHash:
 		c.LbPolicy = envoy.Cluster_RING_HASH
 		c.LbConfig = &envoy.Cluster_RingHashLbConfig_{
 			RingHashLbConfig: &envoy.Cluster_RingHashLbConfig{
@@ -580,7 +587,7 @@ func injectLBToCluster(l structs.LoadBalancer, c *envoy.Cluster) error {
 				MaximumRingSize: &wrappers.UInt64Value{Value: l.RingHashConfig.MaximumRingSize},
 			},
 		}
-	case "maglev":
+	case structs.LBPolicyMaglev:
 		c.LbPolicy = envoy.Cluster_MAGLEV
 	default:
 		return fmt.Errorf("unsupported load balancer policy %q for cluster %q", l.Policy, c.Name)

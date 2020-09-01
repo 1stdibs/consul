@@ -203,25 +203,27 @@ func TestRoutesFromSnapshot(t *testing.T) {
 								OnlyPassing: true,
 							},
 						},
-						LoadBalancer: structs.LoadBalancer{
-							Policy: "ring_hash",
-							RingHashConfig: structs.RingHashConfig{
-								MinimumRingSize: 20,
-								MaximumRingSize: 50,
-							},
-							HashPolicies: []structs.HashPolicy{
-								{
-									Field:           "cookie",
-									FieldMatchValue: "chocolate-chip",
-									Terminal:        true,
+						LoadBalancer: &structs.LoadBalancer{
+							EnvoyLBConfig: &structs.EnvoyLBConfig{
+								Policy: "ring_hash",
+								RingHashConfig: &structs.RingHashConfig{
+									MinimumRingSize: 20,
+									MaximumRingSize: 50,
 								},
-								{
-									Field:           "header",
-									FieldMatchValue: "x-user-id",
-								},
-								{
-									SourceAddress: true,
-									Terminal:      true,
+								HashPolicies: []structs.HashPolicy{
+									{
+										Field:      structs.HashPolicyCookie,
+										FieldValue: "chocolate-chip",
+										Terminal:   true,
+									},
+									{
+										Field:      structs.HashPolicyHeader,
+										FieldValue: "x-user-id",
+									},
+									{
+										SourceIP: true,
+										Terminal: true,
+									},
 								},
 							},
 						},
@@ -280,22 +282,22 @@ func TestRoutesFromSnapshot(t *testing.T) {
 func TestLoadBalancer_injectLBToRouteAction(t *testing.T) {
 	var tests = []struct {
 		name     string
-		lb       structs.LoadBalancer
+		lb       *structs.EnvoyLBConfig
 		expected envoyroute.RouteAction
 	}{
 		{
 			name: "empty",
-			lb: structs.LoadBalancer{
+			lb: &structs.EnvoyLBConfig{
 				Policy: "",
 			},
 			// we only modify route actions for hash-based LB policies
 			expected: envoyroute.RouteAction{},
 		},
 		{
-			name: "least_request",
-			lb: structs.LoadBalancer{
-				Policy: "least_request",
-				LeastRequestConfig: structs.LeastRequestConfig{
+			name: "least request",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyLeastRequest,
+				LeastRequestConfig: &structs.LeastRequestConfig{
 					ChoiceCount: 3,
 				},
 			},
@@ -303,18 +305,18 @@ func TestLoadBalancer_injectLBToRouteAction(t *testing.T) {
 			expected: envoyroute.RouteAction{},
 		},
 		{
-			name: "header",
-			lb: structs.LoadBalancer{
+			name: "headers",
+			lb: &structs.EnvoyLBConfig{
 				Policy: "ring_hash",
-				RingHashConfig: structs.RingHashConfig{
+				RingHashConfig: &structs.RingHashConfig{
 					MinimumRingSize: 3,
 					MaximumRingSize: 7,
 				},
 				HashPolicies: []structs.HashPolicy{
 					{
-						Field:           "header",
-						FieldMatchValue: "x-route-key",
-						Terminal:        true,
+						Field:      structs.HashPolicyHeader,
+						FieldValue: "x-route-key",
+						Terminal:   true,
 					},
 				},
 			},
@@ -333,17 +335,17 @@ func TestLoadBalancer_injectLBToRouteAction(t *testing.T) {
 		},
 		{
 			name: "cookies",
-			lb: structs.LoadBalancer{
-				Policy: "maglev",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyMaglev,
 				HashPolicies: []structs.HashPolicy{
 					{
-						Field:           "cookie",
-						FieldMatchValue: "red-velvet",
-						Terminal:        true,
+						Field:      structs.HashPolicyCookie,
+						FieldValue: "red-velvet",
+						Terminal:   true,
 					},
 					{
-						Field:           "cookie",
-						FieldMatchValue: "oatmeal",
+						Field:      structs.HashPolicyCookie,
+						FieldValue: "oatmeal",
 					},
 				},
 			},
@@ -369,12 +371,12 @@ func TestLoadBalancer_injectLBToRouteAction(t *testing.T) {
 		},
 		{
 			name: "source addr",
-			lb: structs.LoadBalancer{
-				Policy: "maglev",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyMaglev,
 				HashPolicies: []structs.HashPolicy{
 					{
-						SourceAddress: true,
-						Terminal:      true,
+						SourceIP: true,
+						Terminal: true,
 					},
 				},
 			},
@@ -393,21 +395,21 @@ func TestLoadBalancer_injectLBToRouteAction(t *testing.T) {
 		},
 		{
 			name: "kitchen sink",
-			lb: structs.LoadBalancer{
-				Policy: "maglev",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyMaglev,
 				HashPolicies: []structs.HashPolicy{
 					{
-						SourceAddress: true,
-						Terminal:      true,
+						SourceIP: true,
+						Terminal: true,
 					},
 					{
-						Field:           "cookie",
-						FieldMatchValue: "oatmeal",
+						Field:      structs.HashPolicyCookie,
+						FieldValue: "oatmeal",
 					},
 					{
-						Field:           "header",
-						FieldMatchValue: "special-header",
-						Terminal:        true,
+						Field:      structs.HashPolicyHeader,
+						FieldValue: "special-header",
+						Terminal:   true,
 					},
 				},
 			},

@@ -367,10 +367,12 @@ func TestClustersFromSnapshot(t *testing.T) {
 								OnlyPassing: true,
 							},
 						},
-						LoadBalancer: structs.LoadBalancer{
-							Policy: "least_request",
-							LeastRequestConfig: structs.LeastRequestConfig{
-								ChoiceCount: 5,
+						LoadBalancer: &structs.LoadBalancer{
+							EnvoyLBConfig: &structs.EnvoyLBConfig{
+								Policy: "least_request",
+								LeastRequestConfig: &structs.LeastRequestConfig{
+									ChoiceCount: 5,
+								},
 							},
 						},
 					},
@@ -394,11 +396,13 @@ func TestClustersFromSnapshot(t *testing.T) {
 								OnlyPassing: true,
 							},
 						},
-						LoadBalancer: structs.LoadBalancer{
-							Policy: "ring_hash",
-							RingHashConfig: structs.RingHashConfig{
-								MinimumRingSize: 20,
-								MaximumRingSize: 50,
+						LoadBalancer: &structs.LoadBalancer{
+							EnvoyLBConfig: &structs.EnvoyLBConfig{
+								Policy: "ring_hash",
+								RingHashConfig: &structs.RingHashConfig{
+									MinimumRingSize: 20,
+									MaximumRingSize: 50,
+								},
 							},
 						},
 					},
@@ -605,11 +609,13 @@ func TestClustersFromSnapshot(t *testing.T) {
 								OnlyPassing: true,
 							},
 						},
-						LoadBalancer: structs.LoadBalancer{
-							Policy: "ring_hash",
-							RingHashConfig: structs.RingHashConfig{
-								MinimumRingSize: 20,
-								MaximumRingSize: 50,
+						LoadBalancer: &structs.LoadBalancer{
+							EnvoyLBConfig: &structs.EnvoyLBConfig{
+								Policy: "ring_hash",
+								RingHashConfig: &structs.RingHashConfig{
+									MinimumRingSize: 20,
+									MaximumRingSize: 50,
+								},
 							},
 						},
 					},
@@ -838,42 +844,42 @@ func setupTLSRootsAndLeaf(t *testing.T, snap *proxycfg.ConfigSnapshot) {
 func TestLoadBalancer_injectLBToCluster(t *testing.T) {
 	var tests = []struct {
 		name     string
-		lb       structs.LoadBalancer
+		lb       *structs.EnvoyLBConfig
 		expected envoy.Cluster
 	}{
 		{
 			name: "skip empty",
-			lb: structs.LoadBalancer{
+			lb: &structs.EnvoyLBConfig{
 				Policy: "",
 			},
 			expected: envoy.Cluster{},
 		},
 		{
-			name: "round_robin",
-			lb: structs.LoadBalancer{
-				Policy: "round_robin",
+			name: "round robin",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyRoundRobin,
 			},
 			expected: envoy.Cluster{LbPolicy: envoy.Cluster_ROUND_ROBIN},
 		},
 		{
 			name: "random",
-			lb: structs.LoadBalancer{
-				Policy: "random",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyRandom,
 			},
 			expected: envoy.Cluster{LbPolicy: envoy.Cluster_RANDOM},
 		},
 		{
 			name: "maglev",
-			lb: structs.LoadBalancer{
-				Policy: "maglev",
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyMaglev,
 			},
 			expected: envoy.Cluster{LbPolicy: envoy.Cluster_MAGLEV},
 		},
 		{
 			name: "ring_hash",
-			lb: structs.LoadBalancer{
-				Policy: "ring_hash",
-				RingHashConfig: structs.RingHashConfig{
+			lb: &structs.EnvoyLBConfig{
+				Policy: structs.LBPolicyRingHash,
+				RingHashConfig: &structs.RingHashConfig{
 					MinimumRingSize: 3,
 					MaximumRingSize: 7,
 				},
@@ -890,9 +896,9 @@ func TestLoadBalancer_injectLBToCluster(t *testing.T) {
 		},
 		{
 			name: "least_request",
-			lb: structs.LoadBalancer{
+			lb: &structs.EnvoyLBConfig{
 				Policy: "least_request",
-				LeastRequestConfig: structs.LeastRequestConfig{
+				LeastRequestConfig: &structs.LeastRequestConfig{
 					ChoiceCount: 3,
 				},
 			},
