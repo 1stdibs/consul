@@ -123,4 +123,6 @@ func init() {
 	registerEndpoint("/v1/status/peers", []string{"GET"}, (*HTTPHandlers).StatusPeers)
 	registerEndpoint("/v1/snapshot", []string{"GET", "PUT"}, (*HTTPHandlers).Snapshot)
 	registerEndpoint("/v1/txn", []string{"PUT"}, (*HTTPHandlers).Txn)
+	registerEndpoint("/v1/dibsconfigs", []string{"GET"}, (*HTTPHandlers).DibsJsonConfigs)
+	registerEndpoint("/v1/dibsconfigfiles", []string{"GET"}, (*HTTPHandlers).DibsConfigFiles)
 }
