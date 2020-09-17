@@ -25,8 +25,8 @@ const (
 )
 
 type DibsConfigsResponse struct {
-	Buckets []string
-	Configs map[string]interface{}
+	Buckets []string               `json:"buckets"`
+	Configs map[string]interface{} `json:"configs"`
 }
 
 type DibsConfigFilesResponse struct {
