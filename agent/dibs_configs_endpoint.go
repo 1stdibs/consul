@@ -25,24 +25,11 @@ const (
 )
 
 type DibsConfigsResponse struct {
-	Buckets []string               `json:"buckets"`
-	Configs map[string]interface{} `json:"configs"`
-}
-
-type DibsConfigFilesResponse struct {
-	Files          map[string]string
-	CurrentVersion string
+	Buckets []string                   `json:"buckets"`
+	Configs map[string]dibs.ConfigFile `json:"configs"`
 }
 
 func (s *HTTPServer) DibsJsonConfigs(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
-	return s.doDibsConfigs(resp, req, requestTypeJsonConfigs)
-}
-
-func (s *HTTPServer) DibsConfigFiles(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
-	return s.doDibsConfigs(resp, req, requestTypeConfigFiles)
-}
-
-func (s *HTTPServer) doDibsConfigs(resp http.ResponseWriter, req *http.Request, requestType requestType) (interface{}, error) {
 	configBucket := req.URL.Query().Get("configBucket")
 	if configBucket == "" {
 		return nil, fmt.Errorf("must pass configBucket param")
@@ -83,26 +70,10 @@ func (s *HTTPServer) doDibsConfigs(resp http.ResponseWriter, req *http.Request, 
 		return nil, err
 	}
 
-	switch requestType {
-	case requestTypeJsonConfigs:
-		return DibsConfigsResponse{
-			Buckets: buckets,
-			Configs: dibs.GroupConfigs(configs),
-		}, nil
-
-	case requestTypeConfigFiles:
-		files, err := dibs.GetBase64ConfigFiles(configs)
-		if err != nil {
-			return nil, err
-		}
-
-		return DibsConfigFilesResponse{
-			Files:          files,
-			CurrentVersion: currentVersion,
-		}, nil
-	}
-
-	return nil, fmt.Errorf("fell through switch somehow")
+	return DibsConfigsResponse{
+		Buckets: buckets,
+		Configs: dibs.GroupConfigs(configs),
+	}, nil
 }
 
 func (s *HTTPServer) getSchema(currentVersion string) (map[string]map[string]interface{}, error) {
@@ -117,8 +88,8 @@ func (s *HTTPServer) getSchema(currentVersion string) (map[string]map[string]int
 	return schema, nil
 }
 
-func (s *HTTPServer) getConfigs(currentVersion, service string, buckets []string, tokensWithValues map[string]string) (map[string]string, error) {
-	var configs map[string]string
+func (s *HTTPServer) getConfigs(currentVersion, service string, buckets []string, tokensWithValues map[string]string) (map[string]dibs.ConfigValue, error) {
+	var configs map[string]dibs.ConfigValue
 	allConfigs, err := s.getValues(beServicesPrefix + "/" + currentVersion + "/")
 	if err != nil {
 		return nil, err
