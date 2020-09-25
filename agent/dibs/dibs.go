@@ -28,8 +28,8 @@ const (
 )
 
 type ConfigValue struct {
-	Value  string `json:"value"`
-	Bucket string `json:"bucket"`
+	Base64Value string `json:"base64Value"`
+	Bucket      string `json:"bucket"`
 }
 
 type ConfigFile struct {
@@ -86,8 +86,8 @@ func GetConfigs(buckets []string, configs map[string]string, tokensWithValues ma
 			fileName := r.FindStringSubmatch(k)
 			if fileName != nil && fileName[1] != "" {
 				configsByFileName[fileName[1]] = ConfigValue{
-					Value:  base64.RawStdEncoding.EncodeToString([]byte(tokenizeConfigValue(v, tokensWithValues))),
-					Bucket: bucket,
+					Base64Value: base64.RawStdEncoding.EncodeToString([]byte(tokenizeConfigValue(v, tokensWithValues))),
+					Bucket:      bucket,
 				}
 			}
 		}
